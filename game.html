@@ -1,0 +1,364 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web-based Horror Game</title>
+    <style>
+        /* General styling for the page */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #121212;
+            color: #d1d1d1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+        }
+
+        /* Container for the canvas and buttons */
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            background-color: #1e1e1e;
+            padding: 2rem;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        h1 {
+            color: #d1d1d1;
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+
+        /* Status bar for game information */
+        .status-bar {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.2rem;
+            color: #a0a0a0;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        /* Sanity bar styling */
+        .sanity-bar-container {
+            width: 80%;
+            background-color: #333;
+            border-radius: 10px;
+            border: 2px solid #555;
+            overflow: hidden;
+            margin-left: 10px;
+        }
+
+        .sanity-bar {
+            height: 20px;
+            background-color: #b80000;
+            width: 100%;
+            transition: width 0.3s ease-in-out;
+        }
+
+        /* The game canvas */
+        #gameCanvas {
+            background-color: #0a0a0a;
+            border-radius: 8px;
+            border: 2px solid #5a5a5a;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Message box for game over/win states */
+        .message-box {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            border-radius: 12px;
+            padding: 30px 60px;
+            text-align: center;
+            z-index: 100;
+            display: none; /* Hidden by default */
+            border: 2px solid #b80000;
+        }
+
+        .message-box h2 {
+            color: #fff;
+            margin-top: 0;
+            font-size: 2rem;
+        }
+
+        .message-box p {
+            font-size: 1.2rem;
+            color: #ccc;
+        }
+
+        #restartButton {
+            background-color: #b80000;
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: background-color 0.3s ease;
+            margin-top: 15px;
+        }
+
+        #restartButton:hover {
+            background-color: #8a0000;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1>Web-based Horror Game</h1>
+        <div class="status-bar">
+            <span>Sanity:</span>
+            <div class="sanity-bar-container">
+                <div id="sanityBar" class="sanity-bar"></div>
+            </div>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <div id="messageBox" class="message-box">
+        <h2 id="messageTitle"></h2>
+        <p id="messageText"></p>
+        <button id="restartButton">Restart</button>
+    </div>
+
+    <script>
+        // Use an IIFE (Immediately Invoked Function Expression) to protect global scope
+        (function() {
+            // Get the canvas and its 2D drawing context
+            const canvas = document.getElementById('gameCanvas');
+            const ctx = canvas.getContext('2d');
+
+            // Get UI elements
+            const sanityBar = document.getElementById('sanityBar');
+            const messageBox = document.getElementById('messageBox');
+            const messageTitle = document.getElementById('messageTitle');
+            const messageText = document.getElementById('messageText');
+            const restartButton = document.getElementById('restartButton');
+
+            // Game settings and state variables
+            const TILE_SIZE = 40;
+            const GRID_WIDTH = 20;
+            const GRID_HEIGHT = 15;
+            const RELIC_COUNT = 5;
+            const ENEMY_SPEED_MODIFIER = 0.5;
+            const SANITY_DROP_RATE = 0.5;
+            const SANITY_DROP_NEAR_ENEMY = 2;
+            const SANITY_GAIN_RELIC = 20;
+
+            let player = { x: 0, y: 0, sanity: 100 };
+            let enemy = { x: 0, y: 0 };
+            let relics = [];
+            let gameOver = false;
+            let lastEnemyMoveTime = 0;
+            const enemyMoveInterval = 200; // milliseconds between enemy moves
+
+            // Set canvas dimensions based on the grid
+            canvas.width = GRID_WIDTH * TILE_SIZE;
+            canvas.height = GRID_HEIGHT * TILE_SIZE;
+
+            // Function to show the message box
+            function showMessage(title, text) {
+                messageTitle.textContent = title;
+                messageText.textContent = text;
+                messageBox.style.display = 'block';
+            }
+
+            // Function to hide the message box
+            function hideMessage() {
+                messageBox.style.display = 'none';
+            }
+
+            // Function to initialize or reset the game state
+            function init() {
+                gameOver = false;
+                player.x = Math.floor(GRID_WIDTH / 2);
+                player.y = Math.floor(GRID_HEIGHT / 2);
+                player.sanity = 100;
+                relics = [];
+                lastEnemyMoveTime = 0;
+                spawnRelics(RELIC_COUNT);
+                spawnEnemy();
+                hideMessage();
+                gameLoop(); // Start the main game loop
+            }
+
+            // Function to spawn relics at random positions
+            function spawnRelics(count) {
+                for (let i = 0; i < count; i++) {
+                    relics.push({
+                        x: Math.floor(Math.random() * GRID_WIDTH),
+                        y: Math.floor(Math.random() * GRID_HEIGHT)
+                    });
+                }
+            }
+
+            // Function to spawn the enemy at a random position away from the player
+            function spawnEnemy() {
+                let newX, newY;
+                do {
+                    newX = Math.floor(Math.random() * GRID_WIDTH);
+                    newY = Math.floor(Math.random() * GRID_HEIGHT);
+                } while (Math.abs(newX - player.x) < 5 && Math.abs(newY - player.y) < 5);
+                enemy.x = newX;
+                enemy.y = newY;
+            }
+
+            // Function to draw everything on the canvas
+            function draw() {
+                ctx.fillStyle = '#0d0d0d';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.fillStyle = '#ffcc00';
+                relics.forEach(relic => {
+                    ctx.beginPath();
+                    ctx.arc(relic.x * TILE_SIZE + TILE_SIZE / 2, relic.y * TILE_SIZE + TILE_SIZE / 2, TILE_SIZE / 4, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                ctx.fillStyle = '#b80000';
+                ctx.fillRect(enemy.x * TILE_SIZE, enemy.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+
+                ctx.fillStyle = '#00a0a0';
+                ctx.fillRect(player.x * TILE_SIZE, player.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+            }
+
+            // Function to update the game state
+            function update() {
+                if (relics.length === 0) {
+                    gameOver = true;
+                    showMessage('You Escaped!', 'You collected all the relics and found your way out of the darkness.');
+                    return;
+                }
+
+                if (player.sanity <= 0) {
+                    player.sanity = 0;
+                    gameOver = true;
+                    showMessage('Game Over', 'Your sanity has shattered... The darkness consumed you.');
+                    return;
+                }
+
+                sanityBar.style.width = `${player.sanity}%`;
+
+                if (Date.now() - lastEnemyMoveTime > enemyMoveInterval) {
+                    if (enemy.x < player.x) enemy.x++;
+                    else if (enemy.x > player.x) enemy.x--;
+
+                    if (enemy.y < player.y) enemy.y++;
+                    else if (enemy.y > player.y) enemy.y--;
+
+                    lastEnemyMoveTime = Date.now();
+                }
+
+                const distance = Math.abs(player.x - enemy.x) + Math.abs(player.y - enemy.y);
+                if (distance < 5) {
+                    player.sanity -= SANITY_DROP_NEAR_ENEMY * (1 - (distance / 5));
+                }
+                player.sanity -= SANITY_DROP_RATE;
+
+                const collectedRelicIndex = relics.findIndex(
+                    relic => relic.x === player.x && relic.y === player.y
+                );
+                if (collectedRelicIndex !== -1) {
+                    player.sanity += SANITY_GAIN_RELIC;
+                    if (player.sanity > 100) player.sanity = 100;
+                    relics.splice(collectedRelicIndex, 1);
+                }
+
+                if (player.x === enemy.x && player.y === enemy.y) {
+                    gameOver = true;
+                    showMessage('Caught!', 'The entity found you. You didn\'t make it...');
+                    return;
+                }
+            }
+
+            // Main game loop
+            function gameLoop() {
+                if (gameOver) {
+                    return;
+                }
+                update();
+                draw();
+                requestAnimationFrame(gameLoop);
+            }
+
+            // Handle keyboard and touch input
+            document.addEventListener('keydown', (e) => {
+                if (gameOver) return;
+                let newX = player.x;
+                let newY = player.y;
+
+                switch (e.key) {
+                    case 'ArrowUp': newY--; break;
+                    case 'ArrowDown': newY++; break;
+                    case 'ArrowLeft': newX--; break;
+                    case 'ArrowRight': newX++; break;
+                }
+
+                if (newX >= 0 && newX < GRID_WIDTH && newY >= 0 && newY < GRID_HEIGHT) {
+                    player.x = newX;
+                    player.y = newY;
+                }
+            });
+
+            // Touch input for mobile
+            let touchStartX = 0;
+            let touchStartY = 0;
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+            });
+            canvas.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                if (gameOver) return;
+                const touchEndX = e.changedTouches[0].clientX;
+                const touchEndY = e.changedTouches[0].clientY;
+
+                const deltaX = touchEndX - touchStartX;
+                const deltaY = touchEndY - touchStartY;
+
+                let newX = player.x;
+                let newY = player.y;
+
+                if (Math.abs(deltaX) > Math.abs(deltaY)) {
+                    if (deltaX > 0) newX++; else newX--;
+                } else {
+                    if (deltaY > 0) newY++; else newY--;
+                }
+
+                if (newX >= 0 && newX < GRID_WIDTH && newY >= 0 && newY < GRID_HEIGHT) {
+                    player.x = newX;
+                    player.y = newY;
+                }
+            });
+
+            restartButton.addEventListener('click', () => {
+                init();
+            });
+
+            // Start the game
+            init();
+
+        })();
+    </script>
+</body>
+</html>
+
+
+
+
